@@ -1,35 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+
+import '../widgets/time_travel_panel.dart';
+import '../config/config.dart';
+import '../models/photo.dart';
+import '../services/photo_service.dart';
+import '../widgets/photo_stack_viewer.dart';
+import '../ui/frosted_glass.dart';
+import '../ui/app_logos.dart';
+
+const kSlate = Color(0xFF2F3A40); // dark slate gray
+const kBorder = Colors.white; // white outline
+
+// Lighter glass tuning (so it’s not dark/grey)
+const _glassFill = Color.fromRGBO(255, 255, 255, 0.16);
+const _glassFillStrong = Color.fromRGBO(255, 255, 255, 0.24);
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
   @override
-  MapScreenState createState() => MapScreenState();
+  State<MapScreen> createState() => MapScreenState();
 }
 
 class MapScreenState extends State<MapScreen> {
-  late MapController _mapController;
-  LatLng _currentLocation = const LatLng(40.44, -79.99); // Default to Pittsburgh
+  late final MapController _mapController;
+  final PhotoService _photoService = PhotoService();
+
+  bool _timeTravelEnabled = false;
+  DateTime _timeCursorUtc = DateTime.now().toUtc();
+  TimeUnit _unit = TimeUnit.hours;
+
+  LatLng _currentLocation = const LatLng(40.44, -79.99);
   bool _isLoadingLocation = true;
-  
-  // API Keys
-  static const String geoapifyKey = "0df1db71ebcd4be392e29c497fe1926e";
+
+  List<Photo> _photos = [];
+  bool _isLoadingPhotos = true;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _initializeLocation();
+    _loadPhotos();
+  }
+
+  Future<void> _loadPhotos() async {
+    setState(() => _isLoadingPhotos = true);
+
+    final ref = _timeTravelEnabled ? _timeCursorUtc : DateTime.now().toUtc();
+    final photos = await _photoService.fetchPhotosAliveAt(ref);
+
+    if (!mounted) return;
+    setState(() {
+      _photos = photos;
+      _isLoadingPhotos = false;
+    });
   }
 
   Future<void> _initializeLocation() async {
     try {
-      // Request location permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -37,167 +70,117 @@ class MapScreenState extends State<MapScreen> {
 
       if (permission == LocationPermission.whileInUse ||
           permission == LocationPermission.always) {
-        // Get current position
-        Position position = await Geolocator.getCurrentPosition(
+        final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
 
+        if (!mounted) return;
         setState(() {
-          _currentLocation = LatLng(position.latitude, position.longitude);
+          _currentLocation = LatLng(pos.latitude, pos.longitude);
           _isLoadingLocation = false;
         });
 
-        // Animate map to user location
         _mapController.move(_currentLocation, 13);
 
-        // Start tracking location
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
             distanceFilter: 10,
           ),
-        ).listen((Position position) {
-          if (mounted) {
-            setState(() {
-              _currentLocation = LatLng(position.latitude, position.longitude);
-            });
-          }
+        ).listen((pos) {
+          if (!mounted) return;
+          setState(() {
+            _currentLocation = LatLng(pos.latitude, pos.longitude);
+          });
         });
       } else {
-        setState(() {
-          _isLoadingLocation = false;
-        });
+        if (!mounted) return;
+        setState(() => _isLoadingLocation = false);
       }
     } catch (e) {
       debugPrint('Error getting location: $e');
-      setState(() {
-        _isLoadingLocation = false;
-      });
+      if (!mounted) return;
+      setState(() => _isLoadingLocation = false);
     }
   }
 
-  Future<void> _onMapTap(LatLng location) async {
-    // Fetch place details from Geoapify
-    try {
-      final url =
-          'https://api.geoapify.com/v2/place-details?lat=${location.latitude}&lon=${location.longitude}&apiKey=$geoapifyKey';
-      final response = await http.get(Uri.parse(url));
+  // ---------- MARKERS ----------
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['features'] != null && data['features'].isNotEmpty) {
-          final props = data['features'][0]['properties'];
-          final name = props['name'] ?? 'Unknown place';
-          final address = props['formatted'] ?? 'No address available';
-          final categories =
-              props['categories'] != null && props['categories'].isNotEmpty
-                  ? (props['categories'] as List).join(', ')
-                  : 'Unknown type';
-          final phone = props['phone'] ?? '';
-          final website = props['website'] ?? '';
-
-          _showPlaceDetailsBottomSheet(
-            name: name,
-            categories: categories,
-            address: address,
-            phone: phone,
-            website: website,
-            location: location,
-          );
-        } else {
-          _showPlaceDetailsBottomSheet(
-            name: 'No place detail found',
-            categories: '',
-            address: 'No information available',
-            phone: '',
-            website: '',
-            location: location,
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching place details: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error fetching place details: $e')),
-      );
-    }
-  }
-
-  void _showPlaceDetailsBottomSheet({
-    required String name,
-    required String categories,
-    required String address,
-    required String phone,
-    required String website,
-    required LatLng location,
-  }) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16.0),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
+  List<Marker> _buildPhotoMarkers() {
+    return _photos.map((photo) {
+      return Marker(
+        point: photo.location,
+        width: 50,
+        height: 50,
+        child: GestureDetector(
+          onTap: () => _onPhotoMarkerTap(photo.location),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: kBorder, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.30),
+                  blurRadius: 10,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: ClipOval(
+              child: Image.network(
+                photo.imageUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    color: const Color(0xFF0B0D10),
+                    alignment: Alignment.center,
+                    child: const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: const Color(0xFF0B0D10),
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.photo, color: Colors.white, size: 22),
+                  );
+                },
+              ),
+            ),
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              name,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (categories.isNotEmpty)
-              Text(
-                'Category: $categories',
-                style: const TextStyle(color: Colors.grey),
-              ),
-            const SizedBox(height: 8),
-            Text(
-              'Address: $address',
-              style: const TextStyle(color: Colors.grey),
-            ),
-            if (phone.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Phone: $phone',
-                style: const TextStyle(color: Colors.grey),
-              ),
-            ],
-            if (website.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () {
-                  // You can use url_launcher package to open the website
-                  debugPrint('Opening website: $website');
-                },
-                child: Text(
-                  website,
-                  style: const TextStyle(
-                    color: Colors.blue,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ),
-          ],
-        ),
-      ),
+      );
+    }).toList();
+  }
+
+  void _onPhotoMarkerTap(LatLng location) {
+    final nearbyPhotos = _photos.where((photo) {
+      final distance = const Distance().as(
+        LengthUnit.Meter,
+        location,
+        photo.location,
+      );
+      return distance < 500;
+    }).toList();
+
+    nearbyPhotos.sort((a, b) => b.likes.compareTo(a.likes));
+
+    if (nearbyPhotos.isNotEmpty) {
+      _showPhotoStack(nearbyPhotos);
+    }
+  }
+
+  void _showPhotoStack(List<Photo> photos) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => PhotoStackViewer(photos: photos),
     );
   }
 
@@ -207,58 +190,276 @@ class MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
+  // ---------- UI ----------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Snap Map'),
-        backgroundColor: const Color(0xFFBFE9FF), // pastel blue
-      ),
+      appBar: null,
       body: _isLoadingLocation
           ? const Center(child: CircularProgressIndicator())
-          : FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _currentLocation,
-                initialZoom: 13,
-                onTap: (tapPosition, location) => _onMapTap(location),
-              ),
+          : Stack(
               children: [
-                // MapTiler vector tiles with pastel style
-                TileLayer(
-                  urlTemplate:
-                      'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=LIrIBVdY1C3aCgd9pexM',
-                  userAgentPackageName: 'com.snapmapbetter.app',
-                ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _currentLocation,
-                      width: 40,
-                      height: 40,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFC8F7D4), // pastel green
-                          borderRadius: BorderRadius.circular(50),
-                          border: Border.all(color: Colors.white, width: 3),
-                        ),
-                        child: const Icon(
-                          Icons.location_on,
-                          color: Color(0xFF2b2b2b),
-                          size: 20,
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: _currentLocation,
+                    initialZoom: 13,
+                    maxZoom: 18,
+                    minZoom: 3,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=${ApiConfig.maptilerKey}',
+                      userAgentPackageName: 'com.snapmapbetter.app',
+                    ),
+
+                    // CLUSTERS
+                    if (!_isLoadingPhotos && _photos.isNotEmpty)
+                      MarkerClusterLayerWidget(
+                        options: MarkerClusterLayerOptions(
+                          maxClusterRadius: 80,
+                          size: const Size(60, 60),
+                          markers: _buildPhotoMarkers(),
+                          builder: (context, markers) {
+                            return _buildClusterMarker(markers.length, markers);
+                          },
+                          onClusterTap: (cluster) {
+                            final clusterPhotos = cluster.markers.map((marker) {
+                              return _photos.firstWhere(
+                                (photo) => photo.location == marker.point,
+                              );
+                            }).toList();
+
+                            clusterPhotos.sort((a, b) => b.likes.compareTo(a.likes));
+                            _showPhotoStack(clusterPhotos);
+                          },
                         ),
                       ),
+
+                    // CURRENT LOCATION MARKER (square plate + circular dot)
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: _currentLocation,
+                          width: 35,
+                          height: 35,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                width: 33,
+                                height: 33,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: Colors.black.withOpacity(0.25),
+                                  border: Border.all(color: kBorder, width: 1.5),
+                                ),
+                              ),
+                              Container(
+                                width: 25,
+                                height: 25,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withOpacity(0.10),
+                                ),
+                              ),
+                              Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withOpacity(0.92),
+                                  border: Border.all(color: kBorder, width: 2.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.35),
+                                      blurRadius: 10,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+
+                // TOP FROSTED BAR (lighter)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: FrostedGlass(
+                            radius: 22,
+                            blur: 30,
+                            borderColor: kBorder,
+                            borderWidth: 1.6,
+                            fillColor: _glassFill,
+                            gradientOpacity: 0.90,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: const [
+                                Text(
+                                  'Snap Map',
+                                  style: TextStyle(
+                                    color: kSlate,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 16,
+                                  ),
+                                ),
+
+                                // ✅ only this icon becomes SVG
+                                SnapMapTitleIcon(size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+
+                        // ✅ keep refresh as Material icon
+                        FrostedGlass(
+                          radius: 22,
+                          blur: 30,
+                          borderColor: kBorder,
+                          borderWidth: 1.6,
+                          fillColor: _glassFill,
+                          gradientOpacity: 0.90,
+                          padding: const EdgeInsets.all(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(22),
+                            onTap: _loadPhotos,
+                            child: const Icon(Icons.refresh, color: kSlate),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // TIME TRAVEL BUTTON (higher + lighter glass) ✅ keep Material icon
+                Positioned(
+                  right: 14,
+                  bottom: 260,
+                  child: FrostedGlass(
+                    radius: 22,
+                    blur: 30,
+                    borderColor: kBorder,
+                    borderWidth: 1.6,
+                    fillColor: _glassFill,
+                    gradientOpacity: 0.90,
+                    padding: const EdgeInsets.all(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(22),
+                      onTap: () {
+                        setState(() {
+                          _timeTravelEnabled = !_timeTravelEnabled;
+                          _timeCursorUtc = DateTime.now().toUtc();
+                        });
+                        _loadPhotos();
+                      },
+                      child: Icon(
+                        _timeTravelEnabled ? Icons.schedule : Icons.schedule_outlined,
+                        color: kSlate,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // TIME TRAVEL PANEL
+                if (_timeTravelEnabled)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 86,
+                    child: TimeTravelPanel(
+                      cursorUtc: _timeCursorUtc,
+                      unit: _unit,
+                      onUnitChanged: (u) {
+                        setState(() => _unit = u);
+                        _loadPhotos();
+                      },
+                      onCursorChanged: (t) {
+                        setState(() => _timeCursorUtc = t);
+                        _loadPhotos();
+                      },
+                    ),
+                  ),
               ],
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _mapController.move(_currentLocation, 13),
-        tooltip: 'Center on current location',
-        backgroundColor: const Color(0xFFBFE9FF), // pastel blue
-        child: const Icon(Icons.my_location, color: Colors.black),
-      ),
+    );
+  }
+
+  // ---------- CLUSTER MARKER ----------
+
+  Widget _buildClusterMarker(int count, List<Marker> markers) {
+    Photo? topPhoto;
+    if (markers.isNotEmpty) {
+      try {
+        topPhoto = _photos.firstWhere(
+          (p) => p.location == markers.first.point,
+        );
+      } catch (_) {}
+    }
+
+    return Stack(
+      children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: kBorder, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.30),
+                blurRadius: 10,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: topPhoto == null
+                ? Container(color: const Color(0xFF0B0D10))
+                : Image.network(
+                    topPhoto.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(color: const Color(0xFF0B0D10));
+                    },
+                  ),
+          ),
+        ),
+
+        Positioned(
+          bottom: 0,
+          right: 0,
+          child: FrostedGlass(
+            radius: 14,
+            blur: 24,
+            borderColor: kBorder,
+            borderWidth: 1.4,
+            fillColor: _glassFillStrong,
+            gradientOpacity: 0.95,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text(
+              '$count',
+              style: const TextStyle(
+                color: kSlate,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

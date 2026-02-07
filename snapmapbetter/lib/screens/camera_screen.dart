@@ -1,151 +1,382 @@
+import 'dart:async';
 import 'dart:io';
-import 'package:path/path.dart' as p;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// A screen that allows users to take a picture using a given camera.
+import '../theme/app_theme.dart';
+import '../ui/ui.dart';
+import '../ui/app_logos.dart';
+
 class TakePictureScreen extends StatefulWidget {
   const TakePictureScreen({super.key, required this.camera});
-
   final CameraDescription camera;
 
   @override
-  TakePictureScreenState createState() => TakePictureScreenState();
+  State<TakePictureScreen> createState() => _TakePictureScreenState();
 }
 
-class TakePictureScreenState extends State<TakePictureScreen> {
+class _TakePictureScreenState extends State<TakePictureScreen> {
   late CameraController _controller;
-  late Future<void> _initializeControllerFuture;
+  late Future<void> _initController;
+
+  XFile? _captured;
+  bool _isUploading = false;
+  String? _status;
 
   @override
   void initState() {
     super.initState();
-    // To display the current output from the Camera,
-    // create a CameraController.
     _controller = CameraController(
-      // Get a specific camera from the list of available cameras.
       widget.camera,
-      // Define the resolution to use.
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
     );
-
-    // Next, initialize the controller. This returns a Future.
-    _initializeControllerFuture = _controller.initialize();
+    _initController = _controller.initialize();
   }
 
   @override
   void dispose() {
-    // Dispose of the controller when the widget is disposed.
     _controller.dispose();
     super.dispose();
   }
 
+  Future<void> _capture() async {
+    try {
+      await _initController;
+      final file = await _controller.takePicture();
+      setState(() {
+        _captured = file;
+        _status = null;
+      });
+    } catch (e) {
+      setState(() => _status = 'Camera error: $e');
+    }
+  }
+
+  void _retake() {
+    setState(() {
+      _captured = null;
+      _status = null;
+    });
+  }
+
+  Future<Position?> _getLocation() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm != LocationPermission.always &&
+          perm != LocationPermission.whileInUse) {
+        setState(() => _status = 'Location permission denied');
+        return null;
+      }
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (e) {
+      setState(() => _status = 'Location error: $e');
+      return null;
+    }
+  }
+
+  Future<void> _uploadToSupabase() async {
+    if (_captured == null) return;
+
+    setState(() {
+      _isUploading = true;
+      _status = 'Posting…';
+    });
+
+    try {
+      final pos = await _getLocation();
+      if (pos == null) {
+        setState(() => _isUploading = false);
+        return;
+      }
+
+      final supabase = Supabase.instance.client;
+
+      // --- Storage upload ---
+      final file = File(_captured!.path);
+      final ext = p.extension(file.path).isEmpty ? '.jpg' : p.extension(file.path);
+      final filename = 'photo_${DateTime.now().millisecondsSinceEpoch}$ext';
+
+      await supabase.storage.from('photos').upload(
+            filename,
+            file,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+          );
+
+      final publicUrl = supabase.storage.from('photos').getPublicUrl(filename);
+
+      // --- DB insert ---
+      await supabase.from('photos').insert({
+        'image_url': publicUrl,
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'likes': 0,
+      });
+
+      setState(() {
+        _status = 'Posted to map ✅';
+        _isUploading = false;
+        _captured = null;
+      });
+    } catch (e) {
+      setState(() {
+        _status = 'Upload failed: $e';
+        _isUploading = false;
+      });
+    }
+  }
+
+  Future<void> _flipCamera() async {
+    // Optional: implement if you have multiple cameras.
+    setState(() => _status = 'Flip not wired yet (optional).');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Take a picture')),
-      // You must wait until the controller is initialized before displaying the
-      // camera preview. Use a FutureBuilder to display a loading spinner until the
-      // controller has finished initializing.
-      body: FutureBuilder<void>(
-        future: _initializeControllerFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            // If the Future is complete, display the preview.
-            return CameraPreview(_controller);
-          } else {
-            // Otherwise, display a loading indicator.
-            return const Center(child: CircularProgressIndicator());
-          }
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        // Provide an onPressed callback.
-        onPressed: () async {
-          // Take the Picture in a try / catch block. If anything goes wrong,
-          // catch the error.
-          try {
-            // Ensure that the camera is initialized.
-            await _initializeControllerFuture;
-
-            // Attempt to take a picture and get the file `image`
-            // where it was saved.
-            final image = await _controller.takePicture();
-
-            if (!context.mounted) return;
-
-            // Get current location
-            Position? position;
-            try {
-              position = await Geolocator.getCurrentPosition(
-                  desiredAccuracy: LocationAccuracy.high);
-            } catch (e) {
-              position = null;
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        child: FutureBuilder<void>(
+          future: _initController,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
             }
 
-            // Upload to Supabase Storage and insert DB row
-            final supabase = Supabase.instance.client;
-            final bucket = 'photos';
-            final filename = '${DateTime.now().toIso8601String()}_${p.basename(image.path)}';
-            String? publicUrl;
+            final preview = _captured == null
+                ? CameraPreview(_controller)
+                : Image.file(File(_captured!.path), fit: BoxFit.cover);
 
-            try {
-              // Ensure bucket exists in your Supabase project and has public access or
-              // appropriate policy to allow uploads with anon key.
-              final file = File(image.path);
-              await supabase.storage.from(bucket).upload(filename, file);
-              // Get public URL
-              final url = supabase.storage.from(bucket).getPublicUrl(filename);
-              publicUrl = url;
+            return Stack(
+              children: [
+                Positioned.fill(child: preview),
 
-              // Insert DB row into `photos` table
-              final insertData = {
-                'image_url': publicUrl,
-                'lat': position?.latitude ?? 0.0,
-                'lng': position?.longitude ?? 0.0,
-              };
-              await supabase.from('photos').insert(insertData).execute();
-            } catch (e) {
-              debugPrint('Supabase upload/insert error: $e');
-            }
-
-            // If the picture was taken, display it on a new screen.
-            await Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (context) => DisplayPictureScreen(
-                  // Pass the automatically generated path to
-                  // the DisplayPictureScreen widget.
-                  imagePath: image.path,
+                // Top scrim
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: GradientScrim(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    height: 160,
+                  ),
                 ),
-              ),
+
+                // Bottom scrim
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: GradientScrim(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    height: 220,
+                  ),
+                ),
+
+                // Top bar (Stories-like)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: 12,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Row(
+                          children: [
+                            // ✅ ONLY this logo is swapped to your SVG icon variant
+                            const SnapMapTitleIcon(size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'SnapMap',
+                              style: Theme.of(context).textTheme.labelLarge!.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ).animate().fadeIn(duration: 220.ms).slideY(begin: -0.2, end: 0),
+
+                      Row(
+                        children: [
+                          _topIconButton(
+                            icon: Icons.flip_camera_ios_rounded,
+                            onTap: _flipCamera,
+                          ),
+                          const SizedBox(width: 10),
+                          _topIconButton(
+                            icon: Icons.close_rounded,
+                            onTap: () {
+                              if (_captured != null) _retake();
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Status toast
+                if (_status != null)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    top: 76,
+                    child: GlassCard(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Row(
+                        children: [
+                          if (_isUploading)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          else
+                            const Icon(Icons.info_outline, size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _status!,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ).animate().fadeIn(duration: 180.ms).slideY(begin: -0.15, end: 0),
+                  ),
+
+                // Bottom controls (Stories-style)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 18,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Action row (retake / post)
+                      if (_captured != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GlassCard(
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  child: Center(
+                                    child: Text(
+                                      'Retake',
+                                      style: Theme.of(context).textTheme.labelLarge!.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: PillButton(
+                                  onTap: _isUploading ? () {} : _uploadToSupabase,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.send_rounded, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(_isUploading ? 'Posting…' : 'Post'),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ).animate().fadeIn(duration: 180.ms).slideY(begin: 0.12, end: 0),
+                        ),
+
+                      const SizedBox(height: 14),
+
+                      // Shutter row
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            GlassCard(
+                              padding: const EdgeInsets.all(10),
+                              child: const Icon(Icons.flash_off_rounded, size: 20),
+                            ),
+
+                            GestureDetector(
+                              onTap: (_captured == null && !_isUploading) ? _capture : null,
+                              child: StoryRing(
+                                size: 74,
+                                child: Container(
+                                  color: AppTheme.bg,
+                                  child: Center(
+                                    child: Container(
+                                      width: 54,
+                                      height: 54,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _captured == null ? Colors.white : AppTheme.surface2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ).animate().fadeIn(duration: 220.ms).scale(
+                                  begin: const Offset(0.98, 0.98),
+                                  end: const Offset(1, 1),
+                                ),
+
+                            GlassCard(
+                              padding: const EdgeInsets.all(10),
+                              child: const Icon(Icons.tune_rounded, size: 20),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 10),
+                      Text(
+                        _captured == null ? 'Tap to capture' : 'Preview',
+                        style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                              color: AppTheme.text.withOpacity(0.85),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             );
-          } catch (e) {
-            // If an error occurs, log the error to the console.
-            print(e);
-          }
-        },
-        child: const Icon(Icons.camera_alt),
+          },
+        ),
       ),
     );
   }
-}
 
-// A widget that displays the picture taken by the user.
-class DisplayPictureScreen extends StatelessWidget {
-  final String imagePath;
-
-  const DisplayPictureScreen({super.key, required this.imagePath});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Display the Picture')),
-      // The image is stored as a file on the device. Use the `Image.file`
-      // constructor with the given path to display the image.
-      body: Image.file(File(imagePath)),
+  Widget _topIconButton({required IconData icon, required VoidCallback onTap}) {
+    return GlassCard(
+      padding: const EdgeInsets.all(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Icon(icon, size: 20, color: AppTheme.text),
+      ),
     );
   }
 }

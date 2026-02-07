@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+<<<<<<< HEAD
+# API Config
+lib/config/config.dart
+=======
+
+# Environment variables - NEVER commit
+.env
+.env.local
+>>>>>>> 376fd2a (Add flutter_dotenv for environment variable management, load Supabase credentials from .env)
