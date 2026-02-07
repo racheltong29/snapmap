@@ -6,7 +6,7 @@
 <img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/518cae0c-a189-4d33-920f-e70d8a702a77" />
 
 
-SnapMap is a location-based social platform that lets users explore the world through space and time. Users can capture photos, share them on a global map, and use Time Travel mode to view how places evolve across hours, days, months, and years.
+SnapMap is a location-based social platform that lets users explore the world through space and time. Users can capture photos, share them on a global map, and use Time Travel mode to view how places evolve across hours, days, months, and years. The idea is to crowdsource images from across the globe so that users can experience things across spacetime.
 
 The app combines real-time storytelling, historical archiving, and creative exploration into a single interactive experience.
 
