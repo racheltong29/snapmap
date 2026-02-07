@@ -14,6 +14,22 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl());
 
+// Add geolocation control
+const geolocateControl = new maplibregl.GeolocateControl({
+    positionOptions: {
+        enableHighAccuracy: true
+    },
+    trackUserLocation: true,
+    showUserHeading: true
+});
+
+map.addControl(geolocateControl);
+
+// Auto-locate on map load
+map.on('load', () => {
+    geolocateControl.trigger();
+});
+
 map.on('load', () => {
     // Recolor layers: iterate style layers and adjust buildings and roads
     const style = map.getStyle();
