@@ -1,7 +1,10 @@
 import 'dart:io';
+import 'package:path/path.dart' as p;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // A screen that allows users to take a picture using a given camera.
 class TakePictureScreen extends StatefulWidget {
@@ -73,6 +76,41 @@ class TakePictureScreenState extends State<TakePictureScreen> {
             final image = await _controller.takePicture();
 
             if (!context.mounted) return;
+
+            // Get current location
+            Position? position;
+            try {
+              position = await Geolocator.getCurrentPosition(
+                  desiredAccuracy: LocationAccuracy.high);
+            } catch (e) {
+              position = null;
+            }
+
+            // Upload to Supabase Storage and insert DB row
+            final supabase = Supabase.instance.client;
+            final bucket = 'photos';
+            final filename = '${DateTime.now().toIso8601String()}_${p.basename(image.path)}';
+            String? publicUrl;
+
+            try {
+              // Ensure bucket exists in your Supabase project and has public access or
+              // appropriate policy to allow uploads with anon key.
+              final file = File(image.path);
+              await supabase.storage.from(bucket).upload(filename, file);
+              // Get public URL
+              final url = supabase.storage.from(bucket).getPublicUrl(filename);
+              publicUrl = url;
+
+              // Insert DB row into `photos` table
+              final insertData = {
+                'image_url': publicUrl,
+                'lat': position?.latitude ?? 0.0,
+                'lng': position?.longitude ?? 0.0,
+              };
+              await supabase.from('photos').insert(insertData).execute();
+            } catch (e) {
+              debugPrint('Supabase upload/insert error: $e');
+            }
 
             // If the picture was taken, display it on a new screen.
             await Navigator.of(context).push(
