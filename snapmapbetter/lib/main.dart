@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/map_screen.dart';
 import 'screens/camera_screen.dart';
 
@@ -9,6 +10,14 @@ Future<void> main() async {
   // Ensure that plugin services are initialized so that `availableCameras()`
   // can be called before `runApp()`
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Supabase - set these to your project's values
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://YOUR-SUPABASE-URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'YOUR-SUPABASE-ANON-KEY');
+  await Supabase.initialize(
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
+  );
 
   // Obtain a list of the available cameras on the device.
   final cameras = await availableCameras();
