@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Interactive Map with Geoapify Place Details</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<!-- Inject backend URL from environment -->
+<script>
+  window.__BACKEND_URL__ = globalThis.__BACKEND_URL__ || 'http://localhost:3000';
+</script>
+<div id="map"></div>
+<script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

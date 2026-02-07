@@ -211,7 +211,8 @@ class MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Interactive Map'),
+        title: const Text('Snap Map'),
+        backgroundColor: const Color(0xFFBFE9FF), // pastel blue
       ),
       body: _isLoadingLocation
           ? const Center(child: CircularProgressIndicator())
@@ -223,10 +224,10 @@ class MapScreenState extends State<MapScreen> {
                 onTap: (tapPosition, location) => _onMapTap(location),
               ),
               children: [
+                // MapTiler vector tiles with pastel style
                 TileLayer(
                   urlTemplate:
-                      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  subdomains: const ['a', 'b', 'c'],
+                      'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=LIrIBVdY1C3aCgd9pexM',
                   userAgentPackageName: 'com.snapmapbetter.app',
                 ),
                 MarkerLayer(
@@ -237,13 +238,13 @@ class MapScreenState extends State<MapScreen> {
                       height: 40,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.blue,
+                          color: const Color(0xFFC8F7D4), // pastel green
                           borderRadius: BorderRadius.circular(50),
                           border: Border.all(color: Colors.white, width: 3),
                         ),
                         child: const Icon(
                           Icons.location_on,
-                          color: Colors.white,
+                          color: Color(0xFF2b2b2b),
                           size: 20,
                         ),
                       ),
