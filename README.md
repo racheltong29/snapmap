@@ -40,11 +40,6 @@ Download the file named:
 snapmap.apk
 
 
-or
-
-app-release.apk
-
-
 ---
 
 ### Step 2: Enable Installation from Unknown Sources
