@@ -1,9 +1,9 @@
 # SnapMap
-<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/27f4050e-20b0-464a-83ad-81e4408913d6" />
-<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/5b3d192f-ab4a-4d7d-908a-7fcedec7fbe9" />
-<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/1be5142f-c04e-40d5-bff2-8cd5fb39d38e" />
-<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/85cc97d3-2d70-439c-bcb2-1f9bd28047d8" />
-<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/518cae0c-a189-4d33-920f-e70d8a702a77" />
+<img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/27f4050e-20b0-464a-83ad-81e4408913d6" />
+<img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/5b3d192f-ab4a-4d7d-908a-7fcedec7fbe9" />
+<img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/1be5142f-c04e-40d5-bff2-8cd5fb39d38e" />
+<img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/85cc97d3-2d70-439c-bcb2-1f9bd28047d8" />
+<img width="180" height="400" alt="image" src="https://github.com/user-attachments/assets/518cae0c-a189-4d33-920f-e70d8a702a77" />
 
 
 SnapMap is a location-based social platform that lets users explore the world through space and time. Users can capture photos, share them on a global map, and use Time Travel mode to view how places evolve across hours, days, months, and years.
