@@ -193,10 +193,3 @@ License
 This project is developed for educational, research, and demonstration purposes.
 
 All rights reserved.
-
-Contact
-For questions or collaboration inquiries:
-
-Email: rachelto@andrew.cmu.edu
-
-GitHub: https://github.com/racheltong29
